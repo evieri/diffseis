@@ -216,10 +216,10 @@ class GaussianDiffusion(nn.Module):
         if self.mode == "interpolation":
             # here x_cond -> mask
             x_recon = self.denoise_fn(torch.cat([x_start*x_cond, x_noisy], dim=1), continuous_sqrt_alpha_cumprod)
-            loss = self.loss_func(noise, x_recon)
+            loss = F.smooth_l1_loss(noise, x_recon, beta=0.1)
         else:
             x_recon = self.denoise_fn(torch.cat([x_cond, x_noisy], dim=1), continuous_sqrt_alpha_cumprod)
-            loss = self.loss_func(noise, x_recon)
+            loss = F.smooth_l1_loss(noise, x_recon, beta=0.1)
         return loss
 
     def forward(self, x, *args, **kwargs):
@@ -279,6 +279,14 @@ class Dataset(data.Dataset):
             
             img_data = self.transform(img_data)
             img_label = self.transform(img_label)
+            
+            if random.random() > 0.5:
+                img_data = img_data * -1.0
+                img_label = img_label * -1.0
+                
+            gain = random.uniform(0.8, 1.2)
+            img_data = torch.clamp(img_data * gain, min=-1.0, max=1.0)
+            img_label = torch.clamp(img_label * gain, min=-1.0, max=1.0)
             
             return img_data, img_label
         elif self.mode == "interpolation":
