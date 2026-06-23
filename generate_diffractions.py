@@ -12,7 +12,7 @@ nsamples = 128
 num_samples_to_generate = 100
 
 def ricker_wavelet(length=11, f0=25.0, dt=0.004):
-    t = np.arange(-length//2, length//2 + 1) * dt
+    t = np.arange(-(length//2), length//2 + 1) * dt
     y = (1.0 - 2.0 * (np.pi**2) * (f0**2) * (t**2)) * np.exp(-(np.pi**2) * (f0**2) * (t**2))
     return y.astype(np.float32)
 
@@ -66,11 +66,11 @@ for i in range(num_samples_to_generate):
     
     for tr in range(ntraces):
         trace_label = Trace(data=label_data[tr].astype(np.float32))
-        # Optional: Add basic SU headers if required by other tools
-        # trace_label.stats.su = {"trace_header": {"trace_sequence_number_within_line": tr+1}}
+        trace_label.stats.delta = 0.004
         stream_label.append(trace_label)
         
         trace_data = Trace(data=input_data[tr].astype(np.float32))
+        trace_data.stats.delta = 0.004
         stream_data.append(trace_data)
 
     # Save pairs
