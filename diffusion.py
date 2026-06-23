@@ -16,7 +16,7 @@ import os
 from pathlib import Path
 from torch.optim import Adam
 from torchvision import transforms, utils
-from PIL import Image
+import obspy
 
 def cycle(dl):
     while True:
@@ -237,9 +237,7 @@ class Dataset(data.Dataset):
 
         self.transform = transforms.Compose([
             transforms.Resize(image_size),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Lambda(lambda t: (t * 2) - 1)
+            transforms.CenterCrop(image_size)
         ])
 
         
@@ -264,22 +262,35 @@ class Dataset(data.Dataset):
         return  mask
 
     def __getitem__(self, index):
-        data = self.folder+"data/"+str(index)+".png"
-        img_data = Image.open(data)
+        data_path = self.folder+"data/"+str(index)+".su"
+        stream_data = obspy.read(data_path)
+        img_data_np = np.stack([tr.data for tr in stream_data])
+        img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
+        
+        img_data = img_data / (torch.max(torch.abs(img_data)) + 1e-8)
 
         if self.mode == "demultiple":
-            label = self.folder+"labels/"+str(index)+".png"
-            img_label = Image.open(label)
-            return self.transform(img_data), self.transform(img_label)
+            label_path = self.folder+"labels/"+str(index)+".su"
+            stream_label = obspy.read(label_path)
+            img_label_np = np.stack([tr.data for tr in stream_label])
+            img_label = torch.from_numpy(img_label_np).float().unsqueeze(0)
+            
+            img_label = img_label / (torch.max(torch.abs(img_label)) + 1e-8)
+            
+            img_data = self.transform(img_data)
+            img_label = self.transform(img_label)
+            
+            return img_data, img_label
         elif self.mode == "interpolation":
-            return self.irregular_mask(self.transform(img_data)), self.transform(img_data)
+            img_data = self.transform(img_data)
+            return self.irregular_mask(img_data), img_data
         elif self.mode == "denoising":
-            img = self.transform(img_data)
-            mean = torch.mean(img)
-            std = torch.std(img)
-            noise = 0.5*torch.normal(mean, std, size =(img.shape[0], img.shape[1], img.shape[2]))
-            img_ = img + noise
-            return img_, img
+            img_data = self.transform(img_data)
+            mean = torch.mean(img_data)
+            std = torch.std(img_data)
+            noise = 0.5*torch.normal(mean, std, size =(img_data.shape[0], img_data.shape[1], img_data.shape[2]))
+            img_ = img_data + noise
+            return img_, img_data
         
         else:
             print("ERROR MODE")
