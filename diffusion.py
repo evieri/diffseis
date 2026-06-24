@@ -410,6 +410,8 @@ class Trainer(object):
                     self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
                 print(f'{self.step}: {loss.item()}')
+                with open('training_loss_log.txt', 'a') as f:
+                    f.write(f'{self.step}: {loss.item()}\n')
                 
             self.scaler.step(self.opt)
             self.scaler.update()

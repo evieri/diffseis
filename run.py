@@ -2,7 +2,7 @@ from diffusion import GaussianDiffusion, Trainer
 from unet import UNet
 
 mode = "demultiple" #demultiple, interpolation, denoising
-folder = "dataset/"+mode+"/data_train/"
+folder = "data/"
 image_size = (64,128)
 
 model = UNet(
@@ -24,9 +24,9 @@ trainer = Trainer(
     mode = mode,
     folder = folder,
     image_size = image_size,
-    train_batch_size = 4, #32 for A100; 16 for GTX
+    train_batch_size = 8,
     train_lr = 2e-5,
-    train_num_steps = 1000000,         # total training steps
+    train_num_steps = 500,         # total training steps
     gradient_accumulate_every = 2,    # gradient accumulation steps
     ema_decay = 0.995,                # exponential moving average decay
     amp = True,                        # turn on mixed precision
