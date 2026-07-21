@@ -402,11 +402,12 @@ class Trainer(object):
         while self.step < self.train_num_steps:
             for i in range(self.gradient_accumulate_every):
                 img = next(self.dl)
-                inputs = img[0].cuda()
-                gt = img[1].cuda()
+                device = next(self.model.parameters()).device
+                inputs = img[0].to(device)
+                gt = img[1].to(device)
                 
                 with autocast(enabled = self.amp):
-                    loss = self.model(inputs, gt).cuda()
+                    loss = self.model(inputs, gt)
                     self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
                 print(f'{self.step}: {loss.item()}')

@@ -1,14 +1,16 @@
 from diffusion import GaussianDiffusion, Trainer
 from unet import UNet
+import torch
 
 mode = "demultiple" #demultiple, interpolation, denoising
 folder = "data/"
 image_size = (64,128)
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = UNet(
         in_channel=2,
         out_channel=1
-).cuda()
+).to(device)
 
 diffusion = GaussianDiffusion(
     model,
@@ -17,7 +19,7 @@ diffusion = GaussianDiffusion(
     image_size = image_size,
     timesteps = 2000,
     loss_type = 'l1', # L1 or L2
-).cuda()
+).to(device)
 
 trainer = Trainer(
     diffusion,
@@ -29,7 +31,7 @@ trainer = Trainer(
     train_num_steps = 500,         # total training steps
     gradient_accumulate_every = 2,    # gradient accumulation steps
     ema_decay = 0.995,                # exponential moving average decay
-    amp = True,                        # turn on mixed precision
+    amp = torch.cuda.is_available(),  # turn on mixed precision only if CUDA is available
 )
 
 trainer.train()
