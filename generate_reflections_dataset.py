@@ -67,33 +67,40 @@ def generate_input(label: np.ndarray) -> np.ndarray:
 
 def main() -> None:
     shape = (64, 128)
+    num_samples = 100
     
-    # 1. Geracao
-    y_label = generate_label(shape)
-    X_input = generate_input(y_label)
+    import os
+    os.makedirs('data/labels', exist_ok=True)
+    os.makedirs('data/data', exist_ok=True)
     
-    # 2. Salvamento (arrays binarios NPY)
-    np.save('sample_X.npy', X_input)
-    np.save('sample_y.npy', y_label)
-    
-    # 3. Plot de Validacao
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
-    
-    # Usando .T pois o eixo X usualmente e traces (0 a 64) e eixo Y e tempo descendo (0 a 128)
-    vmax = max(np.max(np.abs(X_input)), np.max(np.abs(y_label)))
-    
-    axes[0].imshow(X_input.T, cmap='seismic', aspect='auto', vmin=-vmax, vmax=vmax)
-    axes[0].set_title('Input Ruidoso (X)\n(Reflexoes + Multiplas + Gaussiano)')
-    axes[0].set_xlabel('Traces (Offset)')
-    axes[0].set_ylabel('Tempo (Samples)')
-    
-    axes[1].imshow(y_label.T, cmap='seismic', aspect='auto', vmin=-vmax, vmax=vmax)
-    axes[1].set_title('Label Limpo (y)\n(Reflexoes Primarias)')
-    axes[1].set_xlabel('Traces (Offset)')
-    
-    plt.tight_layout()
-    plt.savefig('sample_01.png', dpi=300)
-    print("Sucesso! Arrays salvos em .npy e grafico gerado em sample_01.png.")
+    for i in range(num_samples):
+        # 1. Geracao
+        y_label = generate_label(shape)
+        X_input = generate_input(y_label)
+        
+        # 2. Salvamento (arrays binarios NPY)
+        np.save(f'data/data/{i}.npy', X_input)
+        np.save(f'data/labels/{i}.npy', y_label)
+        
+        # Plot apenas do primeiro sample como validacao
+        if i == 0:
+            fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+            vmax = max(np.max(np.abs(X_input)), np.max(np.abs(y_label)))
+            
+            axes[0].imshow(X_input.T, cmap='seismic', aspect='auto', vmin=-vmax, vmax=vmax)
+            axes[0].set_title('Input Ruidoso (X)\n(Reflexoes + Multiplas + Gaussiano)')
+            axes[0].set_xlabel('Traces (Offset)')
+            axes[0].set_ylabel('Tempo (Samples)')
+            
+            axes[1].imshow(y_label.T, cmap='seismic', aspect='auto', vmin=-vmax, vmax=vmax)
+            axes[1].set_title('Label Limpo (y)\n(Reflexoes Primarias)')
+            axes[1].set_xlabel('Traces (Offset)')
+            
+            plt.tight_layout()
+            plt.savefig('sample_01.png', dpi=300)
+            plt.close()
+
+    print(f"Sucesso! {num_samples} arrays salvos em data/data/ e data/labels/.")
 
 if __name__ == '__main__':
     main()

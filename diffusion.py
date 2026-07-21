@@ -216,10 +216,10 @@ class GaussianDiffusion(nn.Module):
         if self.mode == "interpolation":
             # here x_cond -> mask
             x_recon = self.denoise_fn(torch.cat([x_start*x_cond, x_noisy], dim=1), continuous_sqrt_alpha_cumprod)
-            loss = F.smooth_l1_loss(noise, x_recon, beta=0.1)
+            loss = F.mse_loss(noise, x_recon)
         else:
             x_recon = self.denoise_fn(torch.cat([x_cond, x_noisy], dim=1), continuous_sqrt_alpha_cumprod)
-            loss = F.smooth_l1_loss(noise, x_recon, beta=0.1)
+            loss = F.mse_loss(noise, x_recon)
         return loss
 
     def forward(self, x, *args, **kwargs):
@@ -235,15 +235,13 @@ class Dataset(data.Dataset):
         self.image_size = image_size
         self.mode = mode
 
-        self.transform = transforms.Compose([
-            transforms.Resize(image_size),
-            transforms.CenterCrop(image_size)
-        ])
+        # Spatial transforms removidas para nao deformar as reflexoes
+        self.transform = None
 
         
     def __len__(self):
         dir_path = self.folder+"data/"
-        res = len([entry for entry in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, entry))])
+        res = len([entry for entry in os.listdir(dir_path) if entry.endswith(".npy")])
         return res
     
     def irregular_mask(self, data, rate=0.5):
@@ -262,23 +260,20 @@ class Dataset(data.Dataset):
         return  mask
 
     def __getitem__(self, index):
-        data_path = self.folder+"data/"+str(index)+".su"
-        stream_data = obspy.read(data_path)
-        img_data_np = np.stack([tr.data for tr in stream_data])
+        data_path = self.folder+"data/"+str(index)+".npy"
+        img_data_np = np.load(data_path)
         img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
         
         img_data = img_data / (torch.max(torch.abs(img_data)) + 1e-8)
 
         if self.mode == "demultiple":
-            label_path = self.folder+"labels/"+str(index)+".su"
-            stream_label = obspy.read(label_path)
-            img_label_np = np.stack([tr.data for tr in stream_label])
+            label_path = self.folder+"labels/"+str(index)+".npy"
+            img_label_np = np.load(label_path)
             img_label = torch.from_numpy(img_label_np).float().unsqueeze(0)
             
             img_label = img_label / (torch.max(torch.abs(img_label)) + 1e-8)
             
-            img_data = self.transform(img_data)
-            img_label = self.transform(img_label)
+            # self.transform removido para preservar geometria espacial
             
             if random.random() > 0.5:
                 img_data = img_data * -1.0
@@ -290,10 +285,8 @@ class Dataset(data.Dataset):
             
             return img_data, img_label
         elif self.mode == "interpolation":
-            img_data = self.transform(img_data)
             return self.irregular_mask(img_data), img_data
         elif self.mode == "denoising":
-            img_data = self.transform(img_data)
             mean = torch.mean(img_data)
             std = torch.std(img_data)
             noise = 0.5*torch.normal(mean, std, size =(img_data.shape[0], img_data.shape[1], img_data.shape[2]))
