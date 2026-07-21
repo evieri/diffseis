@@ -260,14 +260,14 @@ class Dataset(data.Dataset):
         return  mask
 
     def __getitem__(self, index):
-        data_path = self.folder+"data/"+str(index)+".npy"
+        data_path = self.folder+"data/X_"+str(index)+".npy"
         img_data_np = np.load(data_path)
         img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
         
         img_data = img_data / (torch.max(torch.abs(img_data)) + 1e-8)
 
         if self.mode == "demultiple":
-            label_path = self.folder+"labels/"+str(index)+".npy"
+            label_path = self.folder+"labels/y_"+str(index)+".npy"
             img_label_np = np.load(label_path)
             img_label = torch.from_numpy(img_label_np).float().unsqueeze(0)
             

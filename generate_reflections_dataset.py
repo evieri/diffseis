@@ -67,7 +67,7 @@ def generate_input(label: np.ndarray) -> np.ndarray:
 
 def main() -> None:
     shape = (64, 128)
-    num_samples = 100
+    num_samples = 50
     
     import os
     os.makedirs('data/labels', exist_ok=True)
@@ -79,8 +79,8 @@ def main() -> None:
         X_input = generate_input(y_label)
         
         # 2. Salvamento (arrays binarios NPY)
-        np.save(f'data/data/{i}.npy', X_input)
-        np.save(f'data/labels/{i}.npy', y_label)
+        np.save(f'data/data/X_{i}.npy', X_input)
+        np.save(f'data/labels/y_{i}.npy', y_label)
         
         # Plot apenas do primeiro sample como validacao
         if i == 0:
