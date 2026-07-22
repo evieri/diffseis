@@ -23,9 +23,9 @@ ax.set_facecolor(cor_fundo)
 ax.plot(losses, color=cor_linha, linewidth=1.5)
 
 # Estilização minimalista e técnica
-ax.set_title('Convergência do Treinamento - Huber Loss', color=cor_linha, fontsize=14, fontname='serif', pad=15)
+ax.set_title('Convergência do Treinamento - MSE Loss', color=cor_linha, fontsize=14, fontname='serif', pad=15)
 ax.set_xlabel('Iterações (Steps)', color=cor_linha, fontsize=12, fontname='serif')
-ax.set_ylabel('Erro (Smooth L1)', color=cor_linha, fontsize=12, fontname='serif')
+ax.set_ylabel('Erro (MSE)', color=cor_linha, fontsize=12, fontname='serif')
 ax.tick_params(colors=cor_linha)
 
 for spine in ax.spines.values():
@@ -35,5 +35,5 @@ ax.grid(True, linestyle='--', alpha=0.3, color=cor_linha)
 
 # Salva a imagem com fundo transparente e alta resolução
 plt.tight_layout()
-plt.savefig('curva_loss_gamma.png', dpi=300, facecolor=fig.get_facecolor(), edgecolor='none')
-print("Sucesso! O gráfico foi salvo como 'curva_loss_gamma.png' e está pronto para os slides.")
+plt.savefig('loss_curve.png', dpi=300, facecolor=fig.get_facecolor(), edgecolor='none')
+print("Sucesso! O gráfico foi salvo como 'loss_curve.png' e está pronto para os slides.")
