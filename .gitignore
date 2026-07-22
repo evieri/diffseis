@@ -2,14 +2,18 @@
 __pycache__/
 *.pyc
 venv/
+.venv/
 env/
+.ipynb_checkpoints/
 
 # Datasets
 data/
 dataset/
+labels/
 *.su
 *.segy
 *.sgy
+*.npy
 
 # Logs & Results
 training_loss_log.txt
@@ -17,8 +21,3 @@ results*/
 *.pt
 *.pth
 *.ckpt
-
-# Imagens e Graficos
-*.png
-*.jpg
-*.jpeg
