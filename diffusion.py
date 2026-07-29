@@ -169,7 +169,7 @@ class GaussianDiffusion(nn.Module):
     @torch.no_grad()
     def p_sample(self, x, t, clip_denoised=True, condition_x=None):
         model_mean, model_log_variance = self.p_mean_variance( x=x, t=t, clip_denoised=clip_denoised, condition_x=condition_x)
-        noise = torch.randn_like(x) if t > 0 else torch.zeros_like(x)
+        noise = torch.randn(x.size(), device='cpu').to(x.device) if t > 0 else torch.zeros_like(x)
         return model_mean + noise * (0.5 * model_log_variance).exp()
     
     @torch.no_grad()
@@ -180,7 +180,7 @@ class GaussianDiffusion(nn.Module):
             x_cond = x_in*mask
             
         shape = x_cond.shape
-        img = torch.randn(shape, device=device)
+        img = torch.randn(shape, device='cpu').to(device)
         ret_img = x_cond
         for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
             img = self.p_sample(img, i, condition_x=x_cond)
@@ -197,7 +197,7 @@ class GaussianDiffusion(nn.Module):
         return self.p_sample_loop(x_in, mask)
 
     def q_sample(self, x_start, continuous_sqrt_alpha_cumprod, noise=None):
-        noise = default(noise, lambda: torch.randn_like(x_start))
+        noise = default(noise, lambda: torch.randn(x_start.size(), device='cpu').to(x_start.device))
 
         # random gama
         return (continuous_sqrt_alpha_cumprod * x_start + (1 - continuous_sqrt_alpha_cumprod**2).sqrt() * noise)
@@ -209,7 +209,7 @@ class GaussianDiffusion(nn.Module):
             np.random.uniform(self.sqrt_alphas_cumprod_prev[t-1],self.sqrt_alphas_cumprod_prev[t],size=b)).to(x_start.device)
         continuous_sqrt_alpha_cumprod = continuous_sqrt_alpha_cumprod.view(b, -1)
 
-        noise = default(noise, lambda: torch.randn_like(x_start))
+        noise = default(noise, lambda: torch.randn(x_start.size(), device='cpu').to(x_start.device))
 
         x_noisy = self.q_sample(x_start=x_start,continuous_sqrt_alpha_cumprod=continuous_sqrt_alpha_cumprod.view(-1, 1, 1, 1), noise=noise)
 
