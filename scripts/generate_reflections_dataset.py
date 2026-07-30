@@ -97,7 +97,7 @@ def main() -> None:
             axes[1].set_xlabel('Traces (Offset)')
             
             plt.tight_layout()
-            plt.savefig('sample_01.png', dpi=300)
+            plt.savefig(os.path.join(os.path.dirname(__file__), '../results/sample_01.png'), dpi=300)
             plt.close()
 
     print(f"Sucesso! {num_samples} arrays salvos em data/data/ e data/labels/.")

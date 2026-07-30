@@ -1,9 +1,12 @@
-from diffusion import GaussianDiffusion, Trainer
-from unet import UNet
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from src.diffusion import GaussianDiffusion, Trainer
+from src.unet import UNet
 import torch
 
 mode = "demultiple" #demultiple, interpolation, denoising
-folder = "data/"
+folder = os.path.join(os.path.dirname(__file__), "../data/")
 image_size = (64,128)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

@@ -1,8 +1,11 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from diffusion import GaussianDiffusion
-from unet import UNet
+from src.diffusion import GaussianDiffusion
+from src.unet import UNet
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

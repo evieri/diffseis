@@ -1,9 +1,12 @@
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import os
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
-from unet import UNet
-from diffusion import GaussianDiffusion, Trainer
+from src.unet import UNet
+from src.diffusion import GaussianDiffusion, Trainer
 
 def main():
     print("--- Iniciando Pipeline de Inferencia em Dado Real ---")
@@ -25,7 +28,7 @@ def main():
     trainer = Trainer(
         diffusion,
         mode="demultiple",
-        folder="data/",
+        folder=os.path.join(os.path.dirname(__file__), "../data/"),
         image_size=(64, 128),
         train_batch_size=4,
         train_lr=2e-5,

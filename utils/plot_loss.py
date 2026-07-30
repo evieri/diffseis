@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 
 # Lê o arquivo de log que você gerou
 losses = []
-with open('training_loss_log.txt', 'r') as f:
+with open(os.path.join(os.path.dirname(__file__), '../results/training_loss_log.txt'), 'r') as f:
     for line in f:
         if ':' in line:
             try:
