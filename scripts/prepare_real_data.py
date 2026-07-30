@@ -27,46 +27,49 @@ def extract_common_offset(su_file: str, target_offset: int, tol: int = 0) -> np.
     print(f"[+] Secao Common-Offset extraida com sucesso! Dimensoes: {data_2d.shape}")
     return data_2d
 
-def sliding_window_and_save(data_2d: np.ndarray, output_dir: str, 
+import h5py
+
+def sliding_window_and_save(data_2d: np.ndarray, output_h5: str, 
                             patch_size=(64, 128), stride=(32, 64)):
     """
     Fatia a matriz 2D em blocos exatos usando uma janela deslizante.
-    Aplica normalizacao (Max Absoluto) em cada patch e salva em formato .npy.
+    Aplica normalizacao (Max Absoluto) em cada patch e salva no formato HDF5.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(output_h5), exist_ok=True)
     
     num_traces, num_samples = data_2d.shape
     pt, ps = patch_size
     st, ss = stride
     
     idx = 0
-    print(f"[*] Fatiando dados (Patch: {patch_size}, Stride: {stride})...")
+    print(f"[*] Fatiando dados e salvando em {output_h5} (Patch: {patch_size}, Stride: {stride})...")
     
-    for i in range(0, num_traces - pt + 1, st):
-        for j in range(0, num_samples - ps + 1, ss):
-            patch = data_2d[i:i+pt, j:j+ps]
-            
-            # Normalizacao (preservando o sinal e a dinamica relativa dentro do bloco)
-            max_val = np.max(np.abs(patch))
-            if max_val > 0:
-                patch = patch / max_val
+    with h5py.File(output_h5, 'w') as f:
+        for i in range(0, num_traces - pt + 1, st):
+            for j in range(0, num_samples - ps + 1, ss):
+                patch = data_2d[i:i+pt, j:j+ps]
                 
-            np.save(os.path.join(output_dir, f"X_{idx}.npy"), patch.astype(np.float32))
-            idx += 1
-            
-    print(f"[+] Sucesso! {idx} blocos salvos em '{output_dir}'.")
+                max_val = np.max(np.abs(patch))
+                if max_val > 0:
+                    patch = patch / max_val
+                    
+                f.create_dataset(f"X_{idx}", data=patch.astype(np.float32))
+                idx += 1
+                
+    print(f"[+] Sucesso! {idx} blocos salvos no arquivo HDF5 '{output_h5}'.")
+
 
 if __name__ == "__main__":
     # --- CONFIGURACOES DO PIPELINE ---
     SU_FILE = "/home/emmanuel/Documentos/Trabalho/diffseis/arquivos/marine-geom-co100.su"
     TARGET_OFFSET = -100
     TOLERANCE = 0
-    OUTPUT_DIR = "data/data/"
+    OUTPUT_H5 = os.path.join(os.path.dirname(__file__), "../data/real_dataset.h5")
     
     if os.path.exists(SU_FILE):
         print(f"--- Iniciando Pipeline de Ingestao ---")
         data_2d = extract_common_offset(SU_FILE, TARGET_OFFSET, TOLERANCE)
-        sliding_window_and_save(data_2d, OUTPUT_DIR)
+        sliding_window_and_save(data_2d, OUTPUT_H5)
         print(f"--- Pipeline Concluido ---")
     else:
         print(f"[!] Arquivo nao encontrado: {SU_FILE}")

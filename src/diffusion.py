@@ -228,52 +228,90 @@ class GaussianDiffusion(nn.Module):
 
 # dataset classes
 
-class Dataset(data.Dataset):
-    def __init__(self, folder, image_size, mode):
+
+import h5py
+from typing import Tuple
+
+def ricker_wavelet(f0: float = 25.0, dt: float = 0.004, length: int = 11) -> np.ndarray:
+    t = np.arange(-(length // 2), length // 2 + 1) * dt
+    y = (1.0 - 2.0 * (np.pi ** 2) * (f0 ** 2) * (t ** 2)) * np.exp(-(np.pi ** 2) * (f0 ** 2) * (t ** 2))
+    return y.astype(np.float32)
+
+def generate_label(shape: Tuple[int, int]) -> np.ndarray:
+    ntraces, nsamples = shape
+    label = np.zeros(shape, dtype=np.float32)
+    wavelet = ricker_wavelet()
+    half_w = len(wavelet) // 2
+    
+    num_events = np.random.randint(2, 5)
+    for _ in range(num_events):
+        start_time = np.random.randint(20, nsamples - 20)
+        slope = np.random.uniform(-0.15, 0.15)
+        amplitude = np.random.uniform(0.7, 1.0)
+        
+        for tr in range(ntraces):
+            t_idx_exact = start_time + slope * tr
+            t_idx = int(np.round(t_idx_exact))
+            
+            if half_w <= t_idx < nsamples - half_w:
+                label[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * amplitude
+    return label
+
+def generate_input(label: np.ndarray) -> np.ndarray:
+    ntraces, nsamples = label.shape
+    input_data = label.copy()
+    
+    wavelet = ricker_wavelet(f0=15.0)
+    half_w = len(wavelet) // 2
+    
+    num_multiples = np.random.randint(2, 6)
+    for _ in range(num_multiples):
+        start_time = np.random.randint(0, nsamples)
+        slope = np.random.uniform(-0.8, 0.8)
+        curvature = np.random.uniform(-0.005, 0.005)
+        amplitude = np.random.uniform(0.3, 0.7)
+        
+        for tr in range(ntraces):
+            t_idx_exact = start_time + slope * tr + curvature * (tr ** 2)
+            t_idx = int(np.round(t_idx_exact))
+            
+            if half_w <= t_idx < nsamples - half_w:
+                input_data[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * amplitude
+                
+    noise = np.random.normal(0, 0.03, label.shape).astype(np.float32)
+    input_data += noise
+    return input_data
+
+class SyntheticSeismicDataset(data.Dataset):
+    def __init__(self, image_size=(64, 128), virtual_size=5000, mode="demultiple"):
         super().__init__()
-        self.folder = folder
         self.image_size = image_size
+        self.virtual_size = virtual_size
         self.mode = mode
 
-        # Spatial transforms removidas para nao deformar as reflexoes
-        self.transform = None
-
-        
     def __len__(self):
-        dir_path = self.folder+"data/"
-        res = len([entry for entry in os.listdir(dir_path) if entry.endswith(".npy")])
-        return res
+        return self.virtual_size
     
     def irregular_mask(self, data, rate=0.5):
-        """the mask matrix of random sampling
-        Args:
-            data: original data patches
-            rate: sampling rate,range(0,1)
-        """
         n = data.size()[-1]
         mask = torch.torch.zeros(data.size(),dtype=torch.float64)
-        
         v = round(n*rate)
         TM = random.sample(range(n),v)
-        mask[:,:,TM]=1 # missing by column 
+        mask[:,:,TM]=1
         mask = mask.type(torch.HalfTensor)
-        return  mask
+        return mask
 
     def __getitem__(self, index):
-        data_path = self.folder+"data/X_"+str(index)+".npy"
-        img_data_np = np.load(data_path)
-        img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
+        # Generate on-the-fly
+        img_label_np = generate_label(self.image_size)
+        img_data_np = generate_input(img_label_np)
         
+        img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
         img_data = img_data / (torch.max(torch.abs(img_data)) + 1e-8)
 
         if self.mode == "demultiple":
-            label_path = self.folder+"labels/y_"+str(index)+".npy"
-            img_label_np = np.load(label_path)
             img_label = torch.from_numpy(img_label_np).float().unsqueeze(0)
-            
             img_label = img_label / (torch.max(torch.abs(img_label)) + 1e-8)
-            
-            # self.transform removido para preservar geometria espacial
             
             if random.random() > 0.5:
                 img_data = img_data * -1.0
@@ -292,9 +330,52 @@ class Dataset(data.Dataset):
             noise = 0.5*torch.normal(mean, std, size =(img_data.shape[0], img_data.shape[1], img_data.shape[2]))
             img_ = img_data + noise
             return img_, img_data
-        
         else:
-            print("ERROR MODE")
+            raise ValueError("ERROR MODE")
+
+class RealSeismicDataset(data.Dataset):
+    def __init__(self, h5_path, mode="demultiple"):
+        super().__init__()
+        self.h5_path = h5_path
+        self.mode = mode
+        self.file = h5py.File(h5_path, 'r')
+        self.keys = list(self.file.keys())
+
+    def __len__(self):
+        return len(self.keys)
+    
+    def irregular_mask(self, data, rate=0.5):
+        n = data.size()[-1]
+        mask = torch.torch.zeros(data.size(),dtype=torch.float64)
+        v = round(n*rate)
+        TM = random.sample(range(n),v)
+        mask[:,:,TM]=1
+        mask = mask.type(torch.HalfTensor)
+        return mask
+
+    def __getitem__(self, index):
+        img_data_np = self.file[self.keys[index]][:]
+        img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
+        img_data = img_data / (torch.max(torch.abs(img_data)) + 1e-8)
+
+        if self.mode == "demultiple":
+            # For real data inference/training, label might not be available or same as input for self-supervised
+            # Assuming real data only has X. We return X, X as a placeholder if no label.
+            # Usually real data is used for inference, not supervised demultiple without labels.
+            return img_data, img_data 
+        elif self.mode == "interpolation":
+            return self.irregular_mask(img_data), img_data
+        elif self.mode == "denoising":
+            mean = torch.mean(img_data)
+            std = torch.std(img_data)
+            noise = 0.5*torch.normal(mean, std, size =(img_data.shape[0], img_data.shape[1], img_data.shape[2]))
+            img_ = img_data + noise
+            return img_, img_data
+        else:
+            raise ValueError("ERROR MODE")
+
+# Redirect Dataset to SyntheticSeismicDataset for backwards compatibility in notebooks
+Dataset = SyntheticSeismicDataset
 
 # small helper modules
 
@@ -349,8 +430,19 @@ class Trainer(object):
         self.gradient_accumulate_every = gradient_accumulate_every
         self.train_num_steps = train_num_steps
 
-        self.ds = Dataset(self.folder, image_size, mode)
-        self.dl = cycle(data.DataLoader(self.ds, batch_size = train_batch_size, shuffle=True, pin_memory=True))
+        if folder and folder.endswith('.h5'):
+            self.ds = RealSeismicDataset(folder, mode=mode)
+        else:
+            self.ds = SyntheticSeismicDataset(image_size=image_size, virtual_size=10000, mode=mode)
+            
+        self.dl = cycle(data.DataLoader(
+            self.ds, 
+            batch_size = train_batch_size, 
+            shuffle=True, 
+            pin_memory=True,
+            num_workers=8,
+            prefetch_factor=2
+        ))
         self.opt = Adam(diffusion_model.parameters(), lr=train_lr)
 
         self.step = 0

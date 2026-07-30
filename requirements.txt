@@ -53,3 +53,4 @@ tqdm==4.68.3
 triton==3.7.1
 typing_extensions==4.15.0
 urllib3==2.7.0
+h5py
