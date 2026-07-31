@@ -15,7 +15,10 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[*] Dispositivo detectado: {device}")
     
-    model = UNet(in_channel=2, out_channel=1).to(device)
+    model = UNet(in_channel=2, out_channel=1)
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
+    model = model.to(device)
     diffusion = GaussianDiffusion(
         model,
         mode="demultiple",
@@ -28,14 +31,14 @@ def main():
     trainer = Trainer(
         diffusion,
         mode="demultiple",
-        folder=os.path.join(os.path.dirname(__file__), "../data/"),
+        folder=None,
         image_size=(64, 128),
         train_batch_size=4,
         train_lr=2e-5,
         train_num_steps=2000,
         gradient_accumulate_every=2,
         ema_decay=0.995,
-        amp=torch.cuda.is_available()
+        amp=False
     )
     
     # 2. Carga Segura dos Pesos (EMA)
@@ -49,13 +52,14 @@ def main():
         print(f"[!] Por favor, copie o arquivo .pt da maquina NVIDIA para esta pasta.")
         
     # 3. Coleta do Dado Real
-    # Vamos pegar o bloco X_15.npy gerado pelo prepare_real_data.py
-    real_data_path = "data/data/X_15.npy"
+    import h5py
+    real_data_path = "data/real_dataset.h5"
     if not os.path.exists(real_data_path):
         raise FileNotFoundError(f"Arquivo de dado real nao encontrado: {real_data_path}. Rode o prepare_real_data.py primeiro.")
         
-    print(f"[*] Carregando bloco real: {real_data_path}")
-    real_patch_np = np.load(real_data_path) # shape (64, 128)
+    print(f"[*] Carregando bloco real: {real_data_path} (X_15)")
+    with h5py.File(real_data_path, 'r') as f:
+        real_patch_np = f['X_15'][:] # shape (64, 128)
     
     # Prepara o tensor [B, C, H, W] = [1, 1, 64, 128]
     x_in = torch.from_numpy(real_patch_np).float().unsqueeze(0).unsqueeze(0).to(device)
@@ -102,7 +106,8 @@ def main():
     
     plt.colorbar(im2, ax=axes.ravel().tolist(), orientation='horizontal', fraction=0.05, pad=0.1)
     
-    output_png = "inference_real.png"
+    os.makedirs("results", exist_ok=True)
+    output_png = "results/inference_real.png"
     plt.savefig(output_png, dpi=300, bbox_inches='tight')
     plt.close()
     

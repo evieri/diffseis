@@ -246,11 +246,12 @@ def generate_label(shape: Tuple[int, int]) -> np.ndarray:
     num_events = np.random.randint(2, 5)
     for _ in range(num_events):
         start_time = np.random.randint(20, nsamples - 20)
-        slope = np.random.uniform(-0.15, 0.15)
+        slope = np.random.uniform(-0.4, 0.4) # Mergulhos fortes reais
+        curvature = np.random.uniform(-0.001, 0.001) # Leve curvatura natural
         amplitude = np.random.uniform(0.7, 1.0)
         
         for tr in range(ntraces):
-            t_idx_exact = start_time + slope * tr
+            t_idx_exact = start_time + slope * tr + curvature * (tr ** 2)
             t_idx = int(np.round(t_idx_exact))
             
             if half_w <= t_idx < nsamples - half_w:
@@ -267,8 +268,9 @@ def generate_input(label: np.ndarray) -> np.ndarray:
     num_multiples = np.random.randint(2, 6)
     for _ in range(num_multiples):
         start_time = np.random.randint(0, nsamples)
-        slope = np.random.uniform(-0.8, 0.8)
-        curvature = np.random.uniform(-0.005, 0.005)
+        slope = np.random.uniform(-1.0, 1.0)
+        sign = np.random.choice([-1, 1])
+        curvature = sign * np.random.uniform(0.003, 0.015) # Curvatura agressiva
         amplitude = np.random.uniform(0.3, 0.7)
         
         for tr in range(ntraces):

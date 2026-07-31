@@ -61,7 +61,7 @@ def sliding_window_and_save(data_2d: np.ndarray, output_h5: str,
 
 if __name__ == "__main__":
     # --- CONFIGURACOES DO PIPELINE ---
-    SU_FILE = "/home/emmanuel/Documentos/Trabalho/diffseis/arquivos/marine-geom-co100.su"
+    SU_FILE = "data/marine-geom-co100.su"
     TARGET_OFFSET = -100
     TOLERANCE = 0
     OUTPUT_H5 = os.path.join(os.path.dirname(__file__), "../data/real_dataset.h5")
