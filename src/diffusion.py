@@ -182,7 +182,7 @@ class GaussianDiffusion(nn.Module):
         shape = x_cond.shape
         img = torch.randn(shape, device='cpu').to(device)
         ret_img = x_cond
-        for i in tqdm(reversed(range(0, self.num_timesteps)), desc='sampling loop time step', total=self.num_timesteps):
+        for i in tqdm(reversed(range(0, self.num_timesteps)), desc='Inferência no Dado Real', total=self.num_timesteps):
             img = self.p_sample(img, i, condition_x=x_cond)
             if mask is not None:
                 img = x_cond + img*(1.-mask)
@@ -507,6 +507,10 @@ class Trainer(object):
 
             if self.step % self.update_ema_every == 0:
                 self.step_ema()
+            if self.step > 0 and self.step % 5000 == 0:
+                milestone_k = f"{self.step // 1000}k"
+                self.save(milestone_k)
+                print(f"[*] Checkpoint de seguranca salvo: model-{milestone_k}.pt")
             if self.step != 0 and self.step % self.save_and_sample_every == 0:
                 milestone = self.step // self.save_and_sample_every
                 inputs_ = torch.unsqueeze(inputs[0], dim=0)

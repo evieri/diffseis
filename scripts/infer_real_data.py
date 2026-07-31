@@ -60,12 +60,21 @@ def main():
     print(f"[*] Carregando bloco real: {real_data_path} (X_15)")
     with h5py.File(real_data_path, 'r') as f:
         real_patch_np = f['X_15'][:] # shape (64, 128)
+        
+    # Implementa a Normalizacao Max-Absoluto
+    max_val = np.max(np.abs(real_patch_np))
+    if max_val > 0:
+        real_patch_np = real_patch_np / max_val
     
     # Prepara o tensor [B, C, H, W] = [1, 1, 64, 128]
     x_in = torch.from_numpy(real_patch_np).float().unsqueeze(0).unsqueeze(0).to(device)
     
     # 4. Injecao de Processamento (Reverse Diffusion via EMA)
     print("[*] Iniciando Reverse Diffusion (Denoising)...")
+    
+    trainer.ema_model.eval()
+    trainer.model.eval()
+    
     with torch.no_grad():
         # O inference da U-Net retorna o dado no range [-1, 1], vamos normalizar para plotar
         denoised_tensor = trainer.ema_model.inference(x_in=x_in)
@@ -74,6 +83,10 @@ def main():
     # ret_img shape = (2, 1, 64, 128). Queremos apenas a imagem gerada (index 1 ou -1)
     real_data = x_in.squeeze().cpu().numpy()
     denoised_data = denoised_tensor[-1].squeeze().cpu().numpy()
+    
+    # Restaura a amplitude original
+    real_data = real_data * max_val
+    denoised_data = denoised_data * max_val
     
     # 5. Matematica do Ruido
     print("[*] Calculando Ruido Previsto (Real - Limpo)...")
