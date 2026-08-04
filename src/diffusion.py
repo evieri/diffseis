@@ -240,22 +240,29 @@ def ricker_wavelet(f0: float = 25.0, dt: float = 0.004, length: int = 11) -> np.
 def generate_label(shape: Tuple[int, int]) -> np.ndarray:
     ntraces, nsamples = shape
     label = np.zeros(shape, dtype=np.float32)
-    wavelet = ricker_wavelet()
-    half_w = len(wavelet) // 2
     
     num_events = np.random.randint(2, 5)
     for _ in range(num_events):
         start_time = np.random.randint(20, nsamples - 20)
         slope = np.random.uniform(-0.4, 0.4) # Mergulhos fortes reais
         curvature = np.random.uniform(-0.001, 0.001) # Leve curvatura natural
-        amplitude = np.random.uniform(0.7, 1.0)
+        base_amplitude = np.random.uniform(0.7, 1.0)
+        
+        # Randomizacao drastica na espessura/frequencia (10Hz a 70Hz)
+        f0_random = np.random.uniform(10.0, 70.0)
+        wavelet = ricker_wavelet(f0=f0_random)
+        half_w = len(wavelet) // 2
         
         for tr in range(ntraces):
             t_idx_exact = start_time + slope * tr + curvature * (tr ** 2)
             t_idx = int(np.round(t_idx_exact))
             
+            # Textura realista: variacao aleatoria da amplitude no espaco
+            amp_variation = np.random.uniform(0.8, 1.2)
+            trace_amplitude = base_amplitude * amp_variation
+            
             if half_w <= t_idx < nsamples - half_w:
-                label[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * amplitude
+                label[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * trace_amplitude
     return label
 
 def generate_input(label: np.ndarray) -> np.ndarray:
