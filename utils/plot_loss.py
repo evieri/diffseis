@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+import datetime
+import os
 
 # Lê o arquivo de log que você gerou
 losses = []
@@ -35,5 +37,7 @@ ax.grid(True, linestyle='--', alpha=0.3, color=cor_linha)
 
 # Salva a imagem com fundo transparente e alta resolução
 plt.tight_layout()
-plt.savefig('loss_curve.png', dpi=300, facecolor=fig.get_facecolor(), edgecolor='none')
-print("Sucesso! O gráfico foi salvo como 'loss_curve.png' e está pronto para os slides.")
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+output_png = f"loss_curve_{timestamp}.png"
+plt.savefig(output_png, dpi=300, facecolor=fig.get_facecolor(), edgecolor='none')
+print(f"Sucesso! O gráfico foi salvo como '{output_png}' e está pronto para os slides.")

@@ -119,8 +119,10 @@ def main():
     
     plt.colorbar(im2, ax=axes.ravel().tolist(), orientation='horizontal', fraction=0.05, pad=0.1)
     
+    import datetime
     os.makedirs("results", exist_ok=True)
-    output_png = "results/inference_real.png"
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_png = f"results/inference_real_{timestamp}.png"
     plt.savefig(output_png, dpi=300, bbox_inches='tight')
     plt.close()
     

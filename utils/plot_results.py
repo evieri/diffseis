@@ -63,11 +63,14 @@ def main():
     axes[3].imshow(y_pred_np.T, cmap='gray', aspect='auto', vmin=-vmax, vmax=vmax)
     axes[3].set_title('Dado Limpo (Saída Final)')
     
+    import datetime
     plt.tight_layout()
-    plt.savefig('audit_dashboard.png', dpi=300)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_png = f"audit_dashboard_{timestamp}.png"
+    plt.savefig(output_png, dpi=300)
     plt.close()
     
-    print("audit_dashboard.png gerado com sucesso!")
+    print(f"{output_png} gerado com sucesso!")
 
 if __name__ == '__main__':
     main()

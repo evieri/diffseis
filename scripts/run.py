@@ -6,7 +6,7 @@ from src.unet import UNet
 import torch
 
 mode = "demultiple" #demultiple, interpolation, denoising
-folder = None # Uses on-the-fly synthetic data
+folder = "data/real_dataset.h5" # Uses aligned Hess VTI dataset
 image_size = (64,128)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

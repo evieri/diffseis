@@ -219,7 +219,42 @@ class GaussianDiffusion(nn.Module):
             loss = F.mse_loss(noise, x_recon)
         else:
             x_recon = self.denoise_fn(torch.cat([x_cond, x_noisy], dim=1), continuous_sqrt_alpha_cumprod)
-            loss = F.mse_loss(noise, x_recon)
+            loss_mse = F.mse_loss(noise, x_recon)
+            
+            # Recuprar a estimativa do sinal limpo (x_0)
+            sqrt_alpha = continuous_sqrt_alpha_cumprod.view(-1, 1, 1, 1)
+            sqrt_one_minus_alpha_sq = (1 - continuous_sqrt_alpha_cumprod**2).sqrt().view(-1, 1, 1, 1)
+            x_start_pred = (x_noisy - sqrt_one_minus_alpha_sq * x_recon) / sqrt_alpha
+            
+            # O ruído geofísico predito (múltiplas)
+            predicted_multiple = x_cond - x_start_pred
+            
+            # Flatten para Pearson
+            x_s_flat = x_start_pred.view(b, -1)
+            p_m_flat = predicted_multiple.view(b, -1)
+            
+            mean_s = x_s_flat.mean(dim=1, keepdim=True)
+            mean_m = p_m_flat.mean(dim=1, keepdim=True)
+            
+            x_s_centered = x_s_flat - mean_s
+            p_m_centered = p_m_flat - mean_m
+            
+            cov = (x_s_centered * p_m_centered).sum(dim=1)
+            std_s = torch.sqrt((x_s_centered**2).sum(dim=1) + 1e-8)
+            std_m = torch.sqrt((p_m_centered**2).sum(dim=1) + 1e-8)
+            
+            corr = cov / (std_s * std_m)
+            loss_corr = torch.abs(corr).mean()
+            
+            # RMS Penalty
+            rms_pred = torch.sqrt((x_start_pred**2).mean(dim=[1,2,3]) + 1e-8)
+            rms_true = torch.sqrt((x_start**2).mean(dim=[1,2,3]) + 1e-8)
+            loss_rms = torch.abs(rms_pred - rms_true).mean()
+            
+            lambda_corr = 0.1
+            lambda_rms = 0.05
+            loss = loss_mse + lambda_corr * loss_corr + lambda_rms * loss_rms
+            
         return loss
 
     def forward(self, x, *args, **kwargs):
@@ -493,43 +528,46 @@ class Trainer(object):
         self.scaler.load_state_dict(data['scaler'])
 
     def train(self):
-        while self.step < self.train_num_steps:
-            for i in range(self.gradient_accumulate_every):
-                img = next(self.dl)
-                device = next(self.model.parameters()).device
-                inputs = img[0].to(device)
-                gt = img[1].to(device)
+        with tqdm(initial=self.step, total=self.train_num_steps, desc='Treinamento (Loss Hibrida)') as pbar:
+            while self.step < self.train_num_steps:
+                for i in range(self.gradient_accumulate_every):
+                    img = next(self.dl)
+                    device = next(self.model.parameters()).device
+                    inputs = img[0].to(device)
+                    gt = img[1].to(device)
+                    
+                    with autocast(enabled = self.amp):
+                        loss = self.model(inputs, gt)
+                        self.scaler.scale(loss / self.gradient_accumulate_every).backward()
+
+                    with open('training_loss_log.txt', 'a') as f:
+                        f.write(f'{self.step}: {loss.item()}\n')
                 
-                with autocast(enabled = self.amp):
-                    loss = self.model(inputs, gt)
-                    self.scaler.scale(loss / self.gradient_accumulate_every).backward()
+                self.scaler.step(self.opt)
+                self.scaler.update()
+                self.opt.zero_grad()
 
-                print(f'{self.step}: {loss.item()}')
-                with open('training_loss_log.txt', 'a') as f:
-                    f.write(f'{self.step}: {loss.item()}\n')
-                
-            self.scaler.step(self.opt)
-            self.scaler.update()
-            self.opt.zero_grad()
+                pbar.set_postfix(loss=f"{loss.item():.5f}")
+                pbar.update(1)
 
-            if self.step % self.update_ema_every == 0:
-                self.step_ema()
-            if self.step > 0 and self.step % 5000 == 0:
-                milestone_k = f"{self.step // 1000}k"
-                self.save(milestone_k)
-                print(f"[*] Checkpoint de seguranca salvo: model-{milestone_k}.pt")
-            if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                milestone = self.step // self.save_and_sample_every
-                inputs_ = torch.unsqueeze(inputs[0], dim=0)
-                if self.mode == "interpolation":
-                    gt_ = torch.unsqueeze(gt[0], dim=0)
-                    all_images = self.ema_model.inference(x_in=gt_, mask=inputs_)
-                else:
-                    all_images = self.ema_model.inference(x_in=inputs_)
-                all_images = (all_images + 1) * 0.5
-                utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = 6)
-                self.save(milestone)
+                if self.step % self.update_ema_every == 0:
+                    self.step_ema()
+                if self.step > 0 and self.step % 5000 == 0:
+                    milestone_k = f"{self.step // 1000}k"
+                    self.save(milestone_k)
+                    pbar.write(f"[*] Checkpoint de seguranca salvo: model-{milestone_k}.pt")
+                if self.step != 0 and self.step % self.save_and_sample_every == 0:
+                    milestone = self.step // self.save_and_sample_every
+                    inputs_ = torch.unsqueeze(inputs[0], dim=0)
+                    if self.mode == "interpolation":
+                        gt_ = torch.unsqueeze(gt[0], dim=0)
+                        all_images = self.ema_model.inference(x_in=gt_, mask=inputs_)
+                    else:
+                        all_images = self.ema_model.inference(x_in=inputs_)
+                    all_images = (all_images + 1) * 0.5
+                    utils.save_image(all_images, str(self.results_folder / f'sample-{milestone}.png'), nrow = 6)
+                    self.save(milestone)
 
-            self.step += 1
+                self.step += 1
 
         print('training completed')
