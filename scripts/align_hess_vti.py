@@ -17,11 +17,13 @@ def main():
     
     out_h5 = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data/real_dataset.h5'))
     
-    subset_size = 10000
+    subset_size = 156047
     print(f"[1/5] Lendo {subset_size} tracos iniciais do Data I (Sujo)...")
     
     with segyio.open(file_i, "r", ignore_geometry=True) as f_i:
-        offsets_i = f_i.attributes(segyio.TraceField.offset)[0:subset_size]
+        sx_i = f_i.attributes(segyio.TraceField.SourceX)[0:subset_size]
+        gx_i = f_i.attributes(segyio.TraceField.GroupX)[0:subset_size]
+        coords_i = np.column_stack((sx_i, gx_i))
         # Forcar a conversao explcita para array numpy 2D (num_traces, num_samples)
         data_i_subset = np.zeros((subset_size, f_i.samples.size), dtype=np.float32)
         for i in range(subset_size):
@@ -33,30 +35,43 @@ def main():
     with segyio.open(file_ii_1, "r", ignore_geometry=True) as f_ii_1, \
          segyio.open(file_ii_2, "r", ignore_geometry=True) as f_ii_2:
          
-        off_1 = f_ii_1.attributes(segyio.TraceField.offset)[:]
-        off_2 = f_ii_2.attributes(segyio.TraceField.offset)[:]
-        offsets_ii = np.concatenate([off_1, off_2])
+        sy_1 = f_ii_1.attributes(segyio.TraceField.SourceY)[:]
+        gy_1 = f_ii_1.attributes(segyio.TraceField.GroupY)[:]
+        sy_2 = f_ii_2.attributes(segyio.TraceField.SourceY)[:]
+        gy_2 = f_ii_2.attributes(segyio.TraceField.GroupY)[:]
         
-        print("[3/5] Construindo KDTree para mapeamento por Offset Absoluto...")
-        tree = cKDTree(np.abs(offsets_ii).reshape(-1, 1))
+        sy_ii = np.concatenate([sy_1, sy_2])
+        gy_ii = np.concatenate([gy_1, gy_2])
+        coords_ii = np.column_stack((sy_ii, gy_ii))
         
-        _, indices = tree.query(np.abs(offsets_i).reshape(-1, 1))
+        print("[3/5] Construindo KDTree para mapeamento por Coordenadas 2D [Source, Group]...")
+        tree = cKDTree(coords_ii)
+        
+        _, indices = tree.query(coords_i)
         
         print("[4/5] Pareando e reamostrando (Resampling dt=6ms para dt=4ms)...")
         # Matriz alinhada explicita (subset_size, 2000)
         data_ii_aligned = np.zeros((subset_size, 2000), dtype=np.float32)
         
-        len_off_1 = len(off_1)
+        len_1 = len(sy_1)
         for idx_i, idx_ii in enumerate(tqdm(indices, desc="Resampling traces")):
-            if idx_ii < len_off_1:
+            if idx_ii < len_1:
                 tr_ii = f_ii_1.trace[idx_ii]
             else:
-                tr_ii = f_ii_2.trace[idx_ii - len_off_1]
+                tr_ii = f_ii_2.trace[idx_ii - len_1]
                 
             # Resample de tr_ii (1332 amostras) para 2000 amostras usando scipy
             tr_ii_resampled = resample(tr_ii, 2000)
             data_ii_aligned[idx_i] = tr_ii_resampled
             
+    print("      Aplicando Fator de Escala Global no Data II (usando percentil 99.9 robusto)...")
+    max_i = np.percentile(np.abs(data_i_subset), 99.9)
+    max_ii = np.percentile(np.abs(data_ii_aligned), 99.9)
+    if max_ii > 0:
+        scalar = max_i / max_ii
+        data_ii_aligned *= scalar
+        print(f"      Fator de escala global aplicado: {scalar:.2e}")
+        
     print("[5/5] Empacotando em blocos (64, 128) e salvando em HDF5...")
     n_patches_tr = subset_size // 64
     n_patches_time = 2000 // 128

@@ -42,3 +42,8 @@ trainer = Trainer(
 
 trainer.train()
 trainer.save("final")
+
+# Aciona a avaliacao e geracao do painel consolidado
+print("[*] Treinamento concluido. Gerando painel de avaliacao...")
+import subprocess
+subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "evaluate_results.py")])

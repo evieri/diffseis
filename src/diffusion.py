@@ -229,9 +229,11 @@ class GaussianDiffusion(nn.Module):
             # O ruído geofísico predito (múltiplas)
             predicted_multiple = x_cond - x_start_pred
             
-            # Flatten para Pearson
-            x_s_flat = x_start_pred.view(b, -1)
-            p_m_flat = predicted_multiple.view(b, -1)
+            # Flatten para Pearson (força float32 para evitar underflow no AMP)
+            x_s_flat = x_start_pred.view(b, -1).float()
+            p_m_flat = predicted_multiple.view(b, -1).float()
+            x_start_f = x_start.float()
+            x_start_pred_f = x_start_pred.float()
             
             mean_s = x_s_flat.mean(dim=1, keepdim=True)
             mean_m = p_m_flat.mean(dim=1, keepdim=True)
@@ -240,20 +242,21 @@ class GaussianDiffusion(nn.Module):
             p_m_centered = p_m_flat - mean_m
             
             cov = (x_s_centered * p_m_centered).sum(dim=1)
-            std_s = torch.sqrt((x_s_centered**2).sum(dim=1) + 1e-8)
-            std_m = torch.sqrt((p_m_centered**2).sum(dim=1) + 1e-8)
+            eps = 1e-8
+            std_s = torch.sqrt((x_s_centered**2).sum(dim=1) + eps)
+            std_m = torch.sqrt((p_m_centered**2).sum(dim=1) + eps)
             
-            corr = cov / (std_s * std_m)
+            corr = cov / (std_s * std_m + eps)
             loss_corr = torch.abs(corr).mean()
             
             # RMS Penalty
-            rms_pred = torch.sqrt((x_start_pred**2).mean(dim=[1,2,3]) + 1e-8)
-            rms_true = torch.sqrt((x_start**2).mean(dim=[1,2,3]) + 1e-8)
+            rms_pred = torch.sqrt((x_start_pred_f**2).mean(dim=[1,2,3]) + eps)
+            rms_true = torch.sqrt((x_start_f**2).mean(dim=[1,2,3]) + eps)
             loss_rms = torch.abs(rms_pred - rms_true).mean()
             
             lambda_corr = 0.1
             lambda_rms = 0.05
-            loss = loss_mse + lambda_corr * loss_corr + lambda_rms * loss_rms
+            loss = loss_mse.float() + lambda_corr * loss_corr + lambda_rms * loss_rms
             
         return loss
 
@@ -383,10 +386,10 @@ class RealSeismicDataset(data.Dataset):
         self.h5_path = h5_path
         self.mode = mode
         self.file = h5py.File(h5_path, 'r')
-        self.keys = list(self.file.keys())
+        self.num_patches = len(self.file.keys()) // 2
 
     def __len__(self):
-        return len(self.keys)
+        return self.num_patches
     
     def irregular_mask(self, data, rate=0.5):
         n = data.size()[-1]
@@ -398,15 +401,19 @@ class RealSeismicDataset(data.Dataset):
         return mask
 
     def __getitem__(self, index):
-        img_data_np = self.file[self.keys[index]][:]
-        img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
-        img_data = img_data / (torch.max(torch.abs(img_data)) + 1e-8)
+        x_data_np = self.file[f'X_{index}'][()]
+        y_data_np = self.file[f'Y_{index}'][()]
+        
+        x_data = torch.from_numpy(x_data_np).float().unsqueeze(0)
+        y_data = torch.from_numpy(y_data_np).float().unsqueeze(0)
+        
+        # A normalizacao DEVE ser atrelada ao max(X) para preservar o ganho global entre X e Y
+        max_val = torch.max(torch.abs(x_data)) + 1e-8
+        x_data = x_data / max_val
+        y_data = y_data / max_val
 
         if self.mode == "demultiple":
-            # For real data inference/training, label might not be available or same as input for self-supervised
-            # Assuming real data only has X. We return X, X as a placeholder if no label.
-            # Usually real data is used for inference, not supervised demultiple without labels.
-            return img_data, img_data 
+            return x_data, y_data
         elif self.mode == "interpolation":
             return self.irregular_mask(img_data), img_data
         elif self.mode == "denoising":
