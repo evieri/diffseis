@@ -229,6 +229,10 @@ class GaussianDiffusion(nn.Module):
             # O ruído geofísico predito (múltiplas)
             predicted_multiple = x_cond - x_start_pred
             
+            # Clamp para evitar overflow de inf ao elevar ao quadrado no float32
+            x_start_pred = torch.clamp(x_start_pred, min=-50.0, max=50.0)
+            predicted_multiple = torch.clamp(predicted_multiple, min=-50.0, max=50.0)
+            
             # Flatten para Pearson (força float32 para evitar underflow no AMP)
             x_s_flat = x_start_pred.view(b, -1).float()
             p_m_flat = predicted_multiple.view(b, -1).float()
@@ -275,62 +279,93 @@ def ricker_wavelet(f0: float = 25.0, dt: float = 0.004, length: int = 11) -> np.
     y = (1.0 - 2.0 * (np.pi ** 2) * (f0 ** 2) * (t ** 2)) * np.exp(-(np.pi ** 2) * (f0 ** 2) * (t ** 2))
     return y.astype(np.float32)
 
-def generate_label(shape: Tuple[int, int]) -> np.ndarray:
-    ntraces, nsamples = shape
-    label = np.zeros(shape, dtype=np.float32)
+def generate_seismic_gather(gather_size=(256, 256), patch_size=(128, 128)):
+    ntraces, nsamples = gather_size
+    reflections = np.zeros(gather_size, dtype=np.float32)
+    diffractions = np.zeros(gather_size, dtype=np.float32)
     
-    num_events = np.random.randint(2, 5)
+    num_events = np.random.randint(3, 8)
+    horizons = []
+    
     for _ in range(num_events):
-        start_time = np.random.randint(20, nsamples - 20)
-        slope = np.random.uniform(-0.4, 0.4) # Mergulhos fortes reais
-        curvature = np.random.uniform(-0.001, 0.001) # Leve curvatura natural
-        base_amplitude = np.random.uniform(0.7, 1.0)
-        
-        # Randomizacao drastica na espessura/frequencia (10Hz a 70Hz)
-        f0_random = np.random.uniform(10.0, 70.0)
+        start_time = np.random.randint(30, nsamples - 30)
+        amplitude = np.random.uniform(0.7, 1.0)
+        f0_random = np.random.uniform(10.0, 60.0)
         wavelet = ricker_wavelet(f0=f0_random)
         half_w = len(wavelet) // 2
         
+        freq_sin = np.random.uniform(0.5, 3.0) / ntraces
+        phase_sin = np.random.uniform(0, 2*np.pi)
+        amp_sin = np.random.uniform(5.0, 25.0)
+        slope = np.random.uniform(-0.2, 0.2)
+        
+        horizon_t = np.zeros(ntraces, dtype=int)
         for tr in range(ntraces):
-            t_idx_exact = start_time + slope * tr + curvature * (tr ** 2)
-            t_idx = int(np.round(t_idx_exact))
+            t_exact = start_time + slope * tr + amp_sin * np.sin(2 * np.pi * freq_sin * tr + phase_sin)
+            t_idx = int(np.round(t_exact))
+            t_idx = max(0, min(nsamples - 1, t_idx))
+            horizon_t[tr] = t_idx
             
-            # Textura realista: variacao aleatoria da amplitude no espaco
             amp_variation = np.random.uniform(0.8, 1.2)
-            trace_amplitude = base_amplitude * amp_variation
+            trace_amp = amplitude * amp_variation
             
             if half_w <= t_idx < nsamples - half_w:
-                label[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * trace_amplitude
-    return label
-
-def generate_input(label: np.ndarray) -> np.ndarray:
-    ntraces, nsamples = label.shape
-    input_data = label.copy()
-    
-    wavelet = ricker_wavelet(f0=15.0)
-    half_w = len(wavelet) // 2
-    
-    num_multiples = np.random.randint(2, 6)
-    for _ in range(num_multiples):
-        start_time = np.random.randint(0, nsamples)
-        slope = np.random.uniform(-1.0, 1.0)
-        sign = np.random.choice([-1, 1])
-        curvature = sign * np.random.uniform(0.003, 0.015) # Curvatura agressiva
-        amplitude = np.random.uniform(0.3, 0.7)
+                reflections[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * trace_amp
+        horizons.append(horizon_t)
+        
+    num_diffractions = np.random.randint(5, 15)
+    for _ in range(num_diffractions):
+        if len(horizons) > 0:
+            hor_idx = np.random.randint(0, len(horizons))
+            apex_x = np.random.randint(10, ntraces - 10)
+            t0 = horizons[hor_idx][apex_x]
+        else:
+            apex_x = np.random.randint(10, ntraces - 10)
+            t0 = np.random.randint(30, nsamples - 30)
+            
+        velocity = np.random.uniform(1500.0, 4500.0)
+        base_amplitude = np.random.uniform(0.1, 0.35)
+        f0_diff = np.random.uniform(40.0, 90.0)
+        wavelet_diff = ricker_wavelet(f0=f0_diff)
+        half_w = len(wavelet_diff) // 2
+        
+        decay_k = np.random.uniform(0.01, 0.05)
+        
+        dx = 15.0
+        dt = 0.004
+        time_0 = t0 * dt
         
         for tr in range(ntraces):
-            t_idx_exact = start_time + slope * tr + curvature * (tr ** 2)
-            t_idx = int(np.round(t_idx_exact))
+            dist_from_apex = abs(tr - apex_x)
+            dist = dist_from_apex * dx
+            time_x = np.sqrt(time_0**2 + 4 * (dist**2) / (velocity**2))
+            t_idx = int(np.round(time_x / dt))
+            
+            if t_idx >= nsamples:
+                continue
+                
+            amp_decay = np.exp(-decay_k * dist_from_apex)
+            trace_amp = base_amplitude * amp_decay
             
             if half_w <= t_idx < nsamples - half_w:
-                input_data[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * amplitude
+                diffractions[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet_diff * trace_amp
                 
-    noise = np.random.normal(0, 0.03, label.shape).astype(np.float32)
-    input_data += noise
-    return input_data
+    noise = np.random.normal(0, 0.02, gather_size).astype(np.float32)
+    full_wavefield = reflections + diffractions + noise
+    
+    p_x, p_t = patch_size
+    g_x, g_t = gather_size
+    
+    start_x = np.random.randint(0, g_x - p_x) if g_x > p_x else 0
+    start_t = np.random.randint(0, g_t - p_t) if g_t > p_t else 0
+    
+    patch_full = full_wavefield[start_x:start_x+p_x, start_t:start_t+p_t]
+    patch_diff = diffractions[start_x:start_x+p_x, start_t:start_t+p_t]
+    
+    return patch_full, patch_diff, reflections, diffractions, full_wavefield
 
 class SyntheticSeismicDataset(data.Dataset):
-    def __init__(self, image_size=(64, 128), virtual_size=5000, mode="demultiple"):
+    def __init__(self, image_size=(128, 128), virtual_size=5000, mode="demultiple"):
         super().__init__()
         self.image_size = image_size
         self.virtual_size = virtual_size
@@ -349,15 +384,13 @@ class SyntheticSeismicDataset(data.Dataset):
         return mask
 
     def __getitem__(self, index):
-        # Generate on-the-fly
-        img_label_np = generate_label(self.image_size)
-        img_data_np = generate_input(img_label_np)
+        patch_full, patch_diff, _, _, _ = generate_seismic_gather(gather_size=(256, 256), patch_size=self.image_size)
         
-        img_data = torch.from_numpy(img_data_np).float().unsqueeze(0)
+        img_data = torch.from_numpy(patch_full).float().unsqueeze(0)
         img_data = img_data / (torch.max(torch.abs(img_data)) + 1e-8)
 
         if self.mode == "demultiple":
-            img_label = torch.from_numpy(img_label_np).float().unsqueeze(0)
+            img_label = torch.from_numpy(patch_diff).float().unsqueeze(0)
             img_label = img_label / (torch.max(torch.abs(img_label)) + 1e-8)
             
             if random.random() > 0.5:
@@ -501,7 +534,7 @@ class Trainer(object):
         self.amp = amp
         self.scaler = GradScaler(enabled = amp)
         
-        results_folder = './results_'+str(self.mode)
+        results_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', f'results_{self.mode}'))
 
         self.results_folder = Path(results_folder)
         self.results_folder.mkdir(exist_ok = True)
@@ -547,8 +580,12 @@ class Trainer(object):
                         loss = self.model(inputs, gt)
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
-                    with open('training_loss_log.txt', 'a') as f:
+                    loss_log_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'training_loss_log.txt'))
+                    with open(loss_log_path, 'a') as f:
                         f.write(f'{self.step}: {loss.item()}\n')
+                
+                self.scaler.unscale_(self.opt)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 
                 self.scaler.step(self.opt)
                 self.scaler.update()
