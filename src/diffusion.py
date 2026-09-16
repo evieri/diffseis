@@ -217,6 +217,7 @@ class GaussianDiffusion(nn.Module):
             # here x_cond -> mask
             x_recon = self.denoise_fn(torch.cat([x_start*x_cond, x_noisy], dim=1), continuous_sqrt_alpha_cumprod)
             loss = F.mse_loss(noise, x_recon)
+            loss_dict = {"total_loss": loss.item()}
         else:
             x_recon = self.denoise_fn(torch.cat([x_cond, x_noisy], dim=1), continuous_sqrt_alpha_cumprod)
             loss_mse = F.mse_loss(noise, x_recon)
@@ -251,6 +252,7 @@ class GaussianDiffusion(nn.Module):
             std_m = torch.sqrt((p_m_centered**2).sum(dim=1) + eps)
             
             corr = cov / (std_s * std_m + eps)
+            corr = torch.clamp(corr, min=-0.95, max=0.95)
             loss_corr = torch.abs(corr).mean()
             
             # RMS Penalty
@@ -262,7 +264,14 @@ class GaussianDiffusion(nn.Module):
             lambda_rms = 0.05
             loss = loss_mse.float() + lambda_corr * loss_corr + lambda_rms * loss_rms
             
-        return loss
+            loss_dict = {
+                "total_loss": loss.item(),
+                "mse_loss": loss_mse.item(),
+                "pearson_penalty": loss_corr.item(),
+                "rms_constraint": loss_rms.item()
+            }
+            
+        return loss, loss_dict
 
     def forward(self, x, *args, **kwargs):
         return self.p_losses(x, *args, **kwargs)
@@ -271,98 +280,161 @@ class GaussianDiffusion(nn.Module):
 # dataset classes
 
 
-import h5py
-from typing import Tuple
+try:
+    import h5py
+except ImportError:
+    h5py = None
 
-def ricker_wavelet(f0: float = 25.0, dt: float = 0.004, length: int = 11) -> np.ndarray:
+from typing import Tuple, List
+from pydantic import BaseModel, ConfigDict
+
+
+class SeismicGatherData(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    patch_full: np.ndarray
+    patch_diff: np.ndarray
+    reflections: np.ndarray
+    diffractions: np.ndarray
+    full_wavefield: np.ndarray
+
+    def __iter__(self):
+        return iter((self.patch_full, self.patch_diff, self.reflections, self.diffractions, self.full_wavefield))
+
+
+def ricker_wavelet(f0: float = 25.0, dt: float = 0.004, length: int = 15) -> np.ndarray:
+    """Gera wavelet de Ricker de fase zero com amostragem temporal dt."""
     t = np.arange(-(length // 2), length // 2 + 1) * dt
-    y = (1.0 - 2.0 * (np.pi ** 2) * (f0 ** 2) * (t ** 2)) * np.exp(-(np.pi ** 2) * (f0 ** 2) * (t ** 2))
+    arg = (np.pi * f0 * t) ** 2
+    y = (1.0 - 2.0 * arg) * np.exp(-arg)
     return y.astype(np.float32)
 
-def generate_seismic_gather(gather_size=(256, 256), patch_size=(128, 128)):
+
+def _add_reflection_horizon(
+    reflections: np.ndarray,
+    start_time: int,
+    slope: float,
+    amp_sin: float,
+    freq_sin: float,
+    phase_sin: float,
+    amplitude: float,
+    gather_size: Tuple[int, int],
+    wavelet: np.ndarray
+) -> np.ndarray:
+    """Adiciona um horizonte refletor senoidal/inclinado ao volume."""
+    ntraces, nsamples = gather_size
+    half_w = len(wavelet) // 2
+    horizon_t = np.zeros(ntraces, dtype=int)
+    for tr in range(ntraces):
+        t_val = start_time + slope * tr + amp_sin * np.sin(2.0 * np.pi * freq_sin * tr + phase_sin)
+        t_idx = int(np.clip(np.round(t_val), 0, nsamples - 1))
+        horizon_t[tr] = t_idx
+        trace_amp = amplitude * np.random.uniform(0.8, 1.2)
+        if half_w <= t_idx < nsamples - half_w:
+            reflections[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * trace_amp
+    return horizon_t
+
+
+def generate_reflections(gather_size: Tuple[int, int]) -> Tuple[np.ndarray, List[np.ndarray]]:
+    """Gera eventos de reflexão contínuos (senoidais e horizontais)."""
     ntraces, nsamples = gather_size
     reflections = np.zeros(gather_size, dtype=np.float32)
-    diffractions = np.zeros(gather_size, dtype=np.float32)
-    
+    horizons: List[np.ndarray] = []
     num_events = np.random.randint(3, 8)
-    horizons = []
-    
     for _ in range(num_events):
-        start_time = np.random.randint(30, nsamples - 30)
-        amplitude = np.random.uniform(0.7, 1.0)
-        f0_random = np.random.uniform(10.0, 60.0)
-        wavelet = ricker_wavelet(f0=f0_random)
-        half_w = len(wavelet) // 2
-        
-        freq_sin = np.random.uniform(0.5, 3.0) / ntraces
-        phase_sin = np.random.uniform(0, 2*np.pi)
-        amp_sin = np.random.uniform(5.0, 25.0)
-        slope = np.random.uniform(-0.2, 0.2)
-        
-        horizon_t = np.zeros(ntraces, dtype=int)
-        for tr in range(ntraces):
-            t_exact = start_time + slope * tr + amp_sin * np.sin(2 * np.pi * freq_sin * tr + phase_sin)
-            t_idx = int(np.round(t_exact))
-            t_idx = max(0, min(nsamples - 1, t_idx))
-            horizon_t[tr] = t_idx
-            
-            amp_variation = np.random.uniform(0.8, 1.2)
-            trace_amp = amplitude * amp_variation
-            
-            if half_w <= t_idx < nsamples - half_w:
-                reflections[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * trace_amp
-        horizons.append(horizon_t)
-        
+        wavelet = ricker_wavelet(f0=np.random.uniform(10.0, 50.0))
+        h_t = _add_reflection_horizon(
+            reflections=reflections,
+            start_time=np.random.randint(30, nsamples - 30),
+            slope=np.random.uniform(-0.15, 0.15),
+            amp_sin=np.random.uniform(5.0, 22.0),
+            freq_sin=np.random.uniform(0.5, 3.0) / ntraces,
+            phase_sin=np.random.uniform(0.0, 2.0 * np.pi),
+            amplitude=np.random.uniform(0.7, 1.0),
+            gather_size=gather_size,
+            wavelet=wavelet
+        )
+        horizons.append(h_t)
+    return reflections, horizons
+
+
+def _render_single_diffraction(
+    diffractions: np.ndarray,
+    apex_x: int,
+    t0_sample: int,
+    velocity: float,
+    base_amplitude: float,
+    decay_k: float,
+    f0_diff: float,
+    gather_size: Tuple[int, int],
+    dx: float = 15.0,
+    dt: float = 0.004
+) -> None:
+    """Calcula traveltime hiperbólico t(x) = sqrt(t0^2 + 4*(x-apex)^2/v^2) com decaimento exponencial."""
+    ntraces, nsamples = gather_size
+    wavelet = ricker_wavelet(f0=f0_diff, dt=dt, length=15)
+    half_w = len(wavelet) // 2
+    time_0 = t0_sample * dt
+    for tr in range(ntraces):
+        dist = abs(tr - apex_x) * dx
+        t_x = np.sqrt(time_0**2 + (4.0 * (dist**2)) / (velocity**2 + 1e-8))
+        t_idx = int(np.round(t_x / dt))
+        if half_w <= t_idx < nsamples - half_w:
+            amp_decay = np.exp(-decay_k * abs(tr - apex_x))
+            diffractions[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet * (base_amplitude * amp_decay)
+
+
+def generate_diffractions(gather_size: Tuple[int, int], horizons: List[np.ndarray]) -> np.ndarray:
+    """Gera difrações pontuais estruturalmente coerentes ou aleatórias (Zhang et al., 2024)."""
+    ntraces, nsamples = gather_size
+    diffractions = np.zeros(gather_size, dtype=np.float32)
     num_diffractions = np.random.randint(5, 15)
     for _ in range(num_diffractions):
-        if len(horizons) > 0:
-            hor_idx = np.random.randint(0, len(horizons))
-            apex_x = np.random.randint(10, ntraces - 10)
-            t0 = horizons[hor_idx][apex_x]
-        else:
-            apex_x = np.random.randint(10, ntraces - 10)
-            t0 = np.random.randint(30, nsamples - 30)
-            
-        velocity = np.random.uniform(1500.0, 4500.0)
-        base_amplitude = np.random.uniform(0.1, 0.35)
-        f0_diff = np.random.uniform(40.0, 90.0)
-        wavelet_diff = ricker_wavelet(f0=f0_diff)
-        half_w = len(wavelet_diff) // 2
-        
-        decay_k = np.random.uniform(0.01, 0.05)
-        
-        dx = 15.0
-        dt = 0.004
-        time_0 = t0 * dt
-        
-        for tr in range(ntraces):
-            dist_from_apex = abs(tr - apex_x)
-            dist = dist_from_apex * dx
-            time_x = np.sqrt(time_0**2 + 4 * (dist**2) / (velocity**2))
-            t_idx = int(np.round(time_x / dt))
-            
-            if t_idx >= nsamples:
-                continue
-                
-            amp_decay = np.exp(-decay_k * dist_from_apex)
-            trace_amp = base_amplitude * amp_decay
-            
-            if half_w <= t_idx < nsamples - half_w:
-                diffractions[tr, t_idx - half_w : t_idx + half_w + 1] += wavelet_diff * trace_amp
-                
+        apex_x = np.random.randint(10, ntraces - 10)
+        t0 = horizons[np.random.randint(0, len(horizons))][apex_x] if horizons else np.random.randint(30, nsamples - 30)
+        _render_single_diffraction(
+            diffractions=diffractions,
+            apex_x=apex_x,
+            t0_sample=t0,
+            velocity=np.random.uniform(1800.0, 4200.0),
+            base_amplitude=np.random.uniform(0.12, 0.35),
+            decay_k=np.random.uniform(0.015, 0.045),
+            f0_diff=np.random.uniform(40.0, 85.0),
+            gather_size=gather_size
+        )
+    return diffractions
+
+
+def extract_patch(
+    full_wavefield: np.ndarray,
+    diffractions: np.ndarray,
+    gather_size: Tuple[int, int],
+    patch_size: Tuple[int, int]
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Segmenting Scenario (Zhang et al., 2024): extração de sub-patch representativo."""
+    gx, gt = gather_size
+    px, pt = patch_size
+    sx = np.random.randint(0, gx - px + 1) if gx >= px else 0
+    st = np.random.randint(0, gt - pt + 1) if gt >= pt else 0
+    return full_wavefield[sx : sx + px, st : st + pt], diffractions[sx : sx + px, st : st + pt]
+
+
+def generate_seismic_gather(
+    gather_size: Tuple[int, int] = (256, 256),
+    patch_size: Tuple[int, int] = (128, 128)
+) -> SeismicGatherData:
+    """Gera campo total sísmico e segmenta patch de acordo com Zhang et al. (2024)."""
+    reflections, horizons = generate_reflections(gather_size)
+    diffractions = generate_diffractions(gather_size, horizons)
     noise = np.random.normal(0, 0.02, gather_size).astype(np.float32)
     full_wavefield = reflections + diffractions + noise
-    
-    p_x, p_t = patch_size
-    g_x, g_t = gather_size
-    
-    start_x = np.random.randint(0, g_x - p_x) if g_x > p_x else 0
-    start_t = np.random.randint(0, g_t - p_t) if g_t > p_t else 0
-    
-    patch_full = full_wavefield[start_x:start_x+p_x, start_t:start_t+p_t]
-    patch_diff = diffractions[start_x:start_x+p_x, start_t:start_t+p_t]
-    
-    return patch_full, patch_diff, reflections, diffractions, full_wavefield
+    patch_full, patch_diff = extract_patch(full_wavefield, diffractions, gather_size, patch_size)
+    return SeismicGatherData(
+        patch_full=patch_full,
+        patch_diff=patch_diff,
+        reflections=reflections,
+        diffractions=diffractions,
+        full_wavefield=full_wavefield
+    )
 
 class SyntheticSeismicDataset(data.Dataset):
     def __init__(self, image_size=(128, 128), virtual_size=5000, mode="demultiple"):
@@ -416,6 +488,8 @@ class SyntheticSeismicDataset(data.Dataset):
 class RealSeismicDataset(data.Dataset):
     def __init__(self, h5_path, mode="demultiple"):
         super().__init__()
+        if h5py is None:
+            raise ImportError("h5py is required to use RealSeismicDataset. Please install h5py.")
         self.h5_path = h5_path
         self.mode = mode
         self.file = h5py.File(h5_path, 'r')
@@ -568,6 +642,16 @@ class Trainer(object):
         self.scaler.load_state_dict(data['scaler'])
 
     def train(self):
+        import json
+        metrics_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'training_metrics.json'))
+        metrics = []
+        if os.path.exists(metrics_path):
+            try:
+                with open(metrics_path, 'r') as f:
+                    metrics = json.load(f)
+            except:
+                pass
+                
         with tqdm(initial=self.step, total=self.train_num_steps, desc='Treinamento (Loss Hibrida)') as pbar:
             while self.step < self.train_num_steps:
                 for i in range(self.gradient_accumulate_every):
@@ -577,12 +661,21 @@ class Trainer(object):
                     gt = img[1].to(device)
                     
                     with autocast(enabled = self.amp):
-                        loss = self.model(inputs, gt)
+                        loss, loss_dict = self.model(inputs, gt)
                         self.scaler.scale(loss / self.gradient_accumulate_every).backward()
 
-                    loss_log_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'training_loss_log.txt'))
-                    with open(loss_log_path, 'a') as f:
-                        f.write(f'{self.step}: {loss.item()}\n')
+                    # Save to json array
+                    loss_dict["epoch"] = self.step + 1 # Use step as epoch/iteration
+                    
+                    try:
+                        lr = self.opt.param_groups[0]['lr']
+                    except:
+                        lr = 0.001
+                    loss_dict["lr"] = lr
+                    
+                    metrics.append(loss_dict)
+                    with open(metrics_path, 'w') as f:
+                        json.dump(metrics, f, indent=4)
                 
                 self.scaler.unscale_(self.opt)
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
