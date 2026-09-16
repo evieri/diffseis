@@ -341,13 +341,13 @@ def generate_reflections(gather_size: Tuple[int, int]) -> Tuple[np.ndarray, List
     horizons: List[np.ndarray] = []
     num_events = np.random.randint(3, 8)
     for _ in range(num_events):
-        wavelet = ricker_wavelet(f0=np.random.uniform(10.0, 50.0))
+        wavelet = ricker_wavelet(f0=np.random.uniform(15.0, 35.0))
         h_t = _add_reflection_horizon(
             reflections=reflections,
             start_time=np.random.randint(30, nsamples - 30),
-            slope=np.random.uniform(-0.15, 0.15),
-            amp_sin=np.random.uniform(5.0, 22.0),
-            freq_sin=np.random.uniform(0.5, 3.0) / ntraces,
+            slope=np.random.uniform(-0.05, 0.05),
+            amp_sin=np.random.uniform(0.0, 5.0),
+            freq_sin=np.random.uniform(0.1, 0.5) / ntraces,
             phase_sin=np.random.uniform(0.0, 2.0 * np.pi),
             amplitude=np.random.uniform(0.7, 1.0),
             gather_size=gather_size,
