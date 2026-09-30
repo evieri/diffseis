@@ -17,8 +17,12 @@ labels/
 
 # Logs & Results
 training_loss_log.txt
+training_metrics.json
+*.png
+*.log
 results*/
 *.pt
 *.pth
 *.ckpt
 arquivos/
+
