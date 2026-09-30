@@ -49,20 +49,20 @@ def main():
     fig, axes = plt.subplots(1, 3, figsize=(18, 10), dpi=300)
     
     # 1. Data I (Sujo com Múltiplas)
-    im1 = axes[0].imshow(data_sujo.T, cmap='seismic', aspect='auto', vmin=-clip, vmax=clip, interpolation='none')
+    im1 = axes[0].imshow(data_sujo.T, cmap='seismic', aspect='auto', vmin=-clip, vmax=clip, interpolation='bilinear')
     axes[0].set_title(f'Data I: Sujo (Com Múltiplas)\n[Clip: ±{clip:.4f}]', fontsize=14, fontweight='bold')
     axes[0].set_xlabel('Traços', fontsize=12)
     axes[0].set_ylabel('Amostras de Tempo (dt=4ms)', fontsize=12)
     fig.colorbar(im1, ax=axes[0], fraction=0.046, pad=0.04)
     
     # 2. Data II (Gabarito Limpo)
-    im2 = axes[1].imshow(data_limpo.T, cmap='seismic', aspect='auto', vmin=-clip, vmax=clip, interpolation='none')
+    im2 = axes[1].imshow(data_limpo.T, cmap='seismic', aspect='auto', vmin=-clip, vmax=clip, interpolation='bilinear')
     axes[1].set_title(f'Data II: Gabarito Limpo (Primárias)\n[Clip: ±{clip:.4f}]', fontsize=14, fontweight='bold')
     axes[1].set_xlabel('Traços', fontsize=12)
     fig.colorbar(im2, ax=axes[1], fraction=0.046, pad=0.04)
     
     # 3. Diferença (Múltiplas Removidas)
-    im3 = axes[2].imshow(diff.T, cmap='seismic', aspect='auto', vmin=-clip, vmax=clip, interpolation='none')
+    im3 = axes[2].imshow(diff.T, cmap='seismic', aspect='auto', vmin=-clip, vmax=clip, interpolation='bilinear')
     axes[2].set_title('Diferença: Data I - Data II\n(Múltiplas Puras)', fontsize=14, fontweight='bold')
     axes[2].set_xlabel('Traços', fontsize=12)
     fig.colorbar(im3, ax=axes[2], fraction=0.046, pad=0.04)

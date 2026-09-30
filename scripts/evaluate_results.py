@@ -29,12 +29,21 @@ def evaluate():
         loss_type='l2'
     ).to(device)
 
-    ckpt_path = 'results_demultiple/model-final.pt'
+    results_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../results_demultiple'))
+    os.makedirs(results_dir, exist_ok=True)
+    
+    ckpt_path = os.path.join(results_dir, 'model-final.pt')
     if not os.path.exists(ckpt_path):
-        print(f"Checkpoint not found at {ckpt_path}. Looking for others...")
-        # attempt to find latest if final does not exist
-        pass
-    else:
+        import glob
+        all_ckpts = sorted(glob.glob(os.path.join(results_dir, 'model-*.pt')))
+        if all_ckpts:
+            ckpt_path = all_ckpts[-1]
+            print(f"Loading latest available checkpoint: {ckpt_path}")
+        else:
+            print("No checkpoint found. Evaluating with model initialization...")
+            ckpt_path = None
+    
+    if ckpt_path and os.path.exists(ckpt_path):
         print(f"Loading checkpoint {ckpt_path}")
         data = torch.load(ckpt_path, map_location=device)
         if 'ema' in data:
@@ -44,7 +53,8 @@ def evaluate():
 
     # Get data
     print("Loading data...")
-    dataset = RealSeismicDataset('data/real_dataset.h5', mode='demultiple')
+    h5_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data/real_dataset.h5'))
+    dataset = RealSeismicDataset(h5_path, mode='demultiple')
     x_data, y_data = dataset[0] # [1, 64, 128]
 
     x_input = x_data.unsqueeze(0).to(device) # [1, 1, 64, 128]
@@ -60,7 +70,7 @@ def evaluate():
         denoised = denoised_tensor[-1].squeeze().cpu().numpy()
 
     # Load loss
-    loss_path = 'training_loss_log.txt'
+    loss_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../training_loss_log.txt'))
     losses = []
     if os.path.exists(loss_path):
         with open(loss_path, 'r') as f:
@@ -128,22 +138,24 @@ def evaluate():
 
     # Subplot 2: Seismic Panel
     global_arr = np.concatenate([x_dirty.flatten(), y_target.flatten(), denoised.flatten()])
-    clip = np.percentile(np.abs(global_arr), 98)
+    clip = np.nanpercentile(np.abs(global_arr), 98)
+    if np.isnan(clip) or clip == 0:
+        clip = 0.05
     vmin, vmax = -clip, clip
     
     ax21 = plt.subplot(2, 3, 4)
-    ax21.imshow(x_dirty.T, cmap='seismic', aspect='auto', vmin=vmin, vmax=vmax, interpolation='none')
+    ax21.imshow(x_dirty.T, cmap='seismic', aspect='auto', vmin=vmin, vmax=vmax, interpolation='bilinear')
     ax21.set_title('Dirty Data')
     ax21.set_xlabel('Trace')
     ax21.set_ylabel('Time Sample')
 
     ax22 = plt.subplot(2, 3, 5)
-    ax22.imshow(denoised.T, cmap='seismic', aspect='auto', vmin=vmin, vmax=vmax, interpolation='none')
+    ax22.imshow(denoised.T, cmap='seismic', aspect='auto', vmin=vmin, vmax=vmax, interpolation='bilinear')
     ax22.set_title('Denoised Data')
     ax22.set_xlabel('Trace')
 
     ax23 = plt.subplot(2, 3, 6)
-    ax23.imshow(y_target.T, cmap='seismic', aspect='auto', vmin=vmin, vmax=vmax, interpolation='none')
+    ax23.imshow(y_target.T, cmap='seismic', aspect='auto', vmin=vmin, vmax=vmax, interpolation='bilinear')
     ax23.set_title('Clean Data')
     ax23.set_xlabel('Trace')
 
@@ -157,9 +169,8 @@ def evaluate():
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.1)
 
-    os.makedirs('results_demultiple', exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    save_path = f'results_demultiple/evaluation_panel_{timestamp}.png'
+    save_path = os.path.join(results_dir, f'evaluation_panel_{timestamp}.png')
     plt.savefig(save_path, dpi=300)
     print(f'Evaluation saved to {save_path}')
 
