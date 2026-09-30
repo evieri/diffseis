@@ -111,7 +111,9 @@ class GaussianDiffusion(nn.Module):
 
         to_torch = partial(torch.tensor, dtype=torch.float32)
 
-        betas = make_beta_schedule(schedule='linear', n_timestep=timesteps, linear_start=1e-6, linear_end=1e-2)
+        linear_end = min(20.0 / timesteps, 0.2) if timesteps < 2000 else 1e-2
+        linear_start = 1e-4 if timesteps < 2000 else 1e-6
+        betas = make_beta_schedule(schedule='linear', n_timestep=timesteps, linear_start=linear_start, linear_end=linear_end)
         betas = betas.detach().cpu().numpy() if isinstance(betas, torch.Tensor) else betas
         alphas = 1. - betas
         alphas_cumprod = np.cumprod(alphas, axis=0)
